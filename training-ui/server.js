@@ -1434,6 +1434,7 @@ app.post('/api/jobs/:name/generate', async (req, res) => {
                 const envVars = [
                     buildEnvVar('PYTHONIOENCODING', 'utf-8'),
                     buildEnvVar('LOG_LEVEL', 'DEBUG'),
+                    isMacOS ? buildEnvVar('PYTORCH_ENABLE_MPS_FALLBACK', '1') : '',
                     gpuEnv
                 ].filter(Boolean).join('\n');
                 const launchCmd = `python -m accelerate.commands.launch --num_cpu_threads_per_process 1 ${genAccelerateFlags} "${genScript}" ${args.join(' ')}`;
@@ -1515,6 +1516,7 @@ app.post('/api/jobs/:name/generate', async (req, res) => {
             // Standard One-Shot Logic
             const oneShotEnvVars = [
                 buildEnvVar('PYTHONIOENCODING', 'utf-8'),
+                isMacOS ? buildEnvVar('PYTORCH_ENABLE_MPS_FALLBACK', '1') : '',
                 gpuEnv
             ].filter(Boolean).join('\n');
             const oneShotCmd = `python -m accelerate.commands.launch --num_cpu_threads_per_process 1 ${genAccelerateFlags} "${genScript}" ${args.join(' ')}`;
@@ -1695,6 +1697,7 @@ app.post('/api/jobs/:name/train/start', async (req, res) => {
         const trainEnvVars = [
             buildEnvVar('PYTHONIOENCODING', 'utf-8'),
             buildEnvVar('TOKENIZERS_PARALLELISM', 'false'),
+            isMacOS ? buildEnvVar('PYTORCH_ENABLE_MPS_FALLBACK', '1') : '',
             gpuEnv,
             mergedConfig.training_arguments?.step_profile ? buildEnvVar('STEP_PROFILE', '1') : '',
             mergedConfig.training_arguments?.profile_microbatch ? buildEnvVar('PROFILE_MICROBATCH', '1') : '',
