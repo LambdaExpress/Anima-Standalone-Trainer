@@ -13,6 +13,17 @@ let isDraggingBg = false;
 let bgPosPercent = { x: 50, y: 50 };
 let currentSubsets = [];
 let archRegistry = null; // Loaded from /api/architectures
+function t(value) {
+  return window.I18N?.t?.(value) ?? value;
+}
+
+function pathPlaceholder(kind, fallback = "") {
+  return window.I18N?.pathPlaceholder?.(kind) || fallback;
+}
+
+function applyLocalization(root = document) {
+  window.I18N?.apply?.(root);
+}
 // --- DOM Refs ---
 const $ = (id) => document.getElementById(id);
 const jobListEl = $("job-list");
@@ -247,7 +258,7 @@ async function loadJobs() {
   jobListEl.innerHTML = "";
   if (jobs.length === 0) {
     jobListEl.innerHTML =
-      '<div style="padding:20px;text-align:center;color:var(--text-muted)">No jobs yet</div>';
+      `<div style="padding:20px;text-align:center;color:var(--text-muted)">${t("No jobs yet")}</div>`;
     return;
   }
   jobs.forEach((job) => {
@@ -300,7 +311,7 @@ async function selectJob(name) {
     // Subscribe WS
     subscribeToJob(name);
     // Reset console
-    consoleOutput.textContent = "Waiting for training to start...";
+    consoleOutput.textContent = t("Waiting for training to start...");
     // Reset save button
     $("btn-save").classList.add("hidden");
     $("btn-discard").classList.add("hidden");
@@ -913,7 +924,7 @@ function renderSubsets() {
     card.style.padding = isCollapsed ? "8px 15px" : "15px";
     const dirName = subset.image_dir
       ? subset.image_dir.split(/[\\/]/).pop()
-      : "Empty Path";
+      : t("Empty Path");
     card.innerHTML = `
             <div class="prompt-card-header" style="justify-content: space-between; align-items: center; border-bottom: ${isCollapsed ? "none" : "1px solid var(--border)"}; padding-bottom: ${isCollapsed ? "0" : "8px"}; margin-bottom: ${isCollapsed ? "0" : "12px"};">
                 <div style="display: flex; align-items: center; gap: 10px; cursor: pointer; flex: 1;" class="subset-toggle">
@@ -928,7 +939,7 @@ function renderSubsets() {
                 <div class="form-group">
                     <label style="font-size: 0.8rem;">Image Directory</label>
                     <div style="display: flex; gap: 8px;">
-                        <input type="text" class="sub-image-dir" value="${escapeHtml(subset.image_dir)}" placeholder="C:\\path\\to\\images" style="flex: 1;">
+                        <input type="text" class="sub-image-dir" value="${escapeHtml(subset.image_dir)}" placeholder="${pathPlaceholder("image_dir", "C:\\path\\to\\images")}" style="flex: 1;">
                         <button class="btn btn-secondary btn-open-dir" title="Open folder">📂</button>
                     </div>
                 </div>
@@ -2102,8 +2113,8 @@ function updateTbState(running, url) {
   $("btn-tb-stop").classList.toggle("hidden", !running);
   $("btn-tb-open").classList.toggle("hidden", !running);
   $("tb-status").textContent = running
-    ? `Running on port ${new URL(url).port}`
-    : "Not running";
+    ? `${t("Running on port")} ${new URL(url).port}`
+    : t("Not running");
   $("tb-status").style.color = running ? "var(--success)" : "var(--text-muted)";
   if (running && url) {
     tbUrl = url;
@@ -2123,7 +2134,7 @@ function updateTbState(running, url) {
 async function launchTensorBoard() {
   if (!currentJob) return;
   $("btn-tb-launch").disabled = true;
-  $("btn-tb-launch").textContent = "Starting...";
+  $("btn-tb-launch").textContent = t("Starting...");
   const result = await api(`/api/jobs/${currentJob}/tensorboard`, {
     method: "POST",
   });
@@ -2137,7 +2148,7 @@ async function launchTensorBoard() {
   setTimeout(() => {
     updateTbState(true, result.url);
     $("btn-tb-launch").disabled = false;
-    $("btn-tb-launch").textContent = "\uD83D\uDE80 Launch";
+    $("btn-tb-launch").textContent = t("\uD83D\uDE80 Launch");
     showToast("TensorBoard launched");
   }, 2000);
 }
@@ -2169,7 +2180,7 @@ function buildGlobalSettingsTabs(registry) {
     const btn = document.createElement("button");
     btn.className = "tab" + (isFirst ? " active" : "");
     btn.dataset.gtab = archId;
-    btn.textContent = arch.display_name + " Models";
+    btn.textContent = t(`${arch.display_name} Models`);
     nav.appendChild(btn);
     // Tab pane
     const pane = document.createElement("div");
@@ -2190,8 +2201,8 @@ function buildGlobalSettingsTabs(registry) {
       const syncGroup = document.createElement("div");
       syncGroup.style.marginTop = "8px";
       syncGroup.innerHTML = `
-                <button class="btn btn-secondary btn-sm" id="btn-sync-${archId}">\uD83D\uDD04 Use as All-in-One Checkpoint</button>
-                <small style="display: block; margin-top: 4px;">Copies the first path to all other fields for this architecture.</small>
+                <button class="btn btn-secondary btn-sm" id="btn-sync-${archId}">\uD83D\uDD04 ${t("Use as All-in-One Checkpoint")}</button>
+                <small style="display: block; margin-top: 4px;">${t("Copies the first path to all other fields for this architecture.")}</small>
             `;
       pane.appendChild(syncGroup);
     }
@@ -2203,7 +2214,7 @@ function buildGlobalSettingsTabs(registry) {
   const appBtn = document.createElement("button");
   appBtn.className = "tab";
   appBtn.dataset.gtab = "app";
-  appBtn.textContent = "Application";
+  appBtn.textContent = t("Application");
   nav.appendChild(appBtn);
   // Bind tab switching
   nav.querySelectorAll(".tab").forEach((tab) => {
@@ -2488,17 +2499,17 @@ function closeModal(id) {
   $(id).classList.add("hidden");
 }
 function showConfirm(title, message, onConfirm) {
-  $("confirm-title").textContent = title;
-  $("confirm-message").textContent = message;
+  $("confirm-title").textContent = t(title);
+  $("confirm-message").textContent = t(message);
   const actions = $("confirm-actions");
   actions.innerHTML = "";
   const cancelBtn = document.createElement("button");
   cancelBtn.className = "btn btn-ghost";
-  cancelBtn.textContent = "Cancel";
+  cancelBtn.textContent = t("Cancel");
   cancelBtn.onclick = () => closeModal("modal-confirm");
   const confirmBtn = document.createElement("button");
   confirmBtn.className = "btn btn-danger";
-  confirmBtn.textContent = "Confirm";
+  confirmBtn.textContent = t("Confirm");
   confirmBtn.onclick = () => {
     closeModal("modal-confirm");
     onConfirm();
@@ -2516,7 +2527,7 @@ function showToast(msg) {
         color: var(--text-primary); font-size: 0.9rem;
         box-shadow: var(--shadow); animation: fadeIn 0.2s;
     `;
-  toast.textContent = msg;
+  toast.textContent = t(msg);
   document.body.appendChild(toast);
   setTimeout(() => {
     toast.style.opacity = "0";
@@ -2615,7 +2626,7 @@ async function loadGPUs() {
     container.innerHTML = "";
     if (gpus.length === 0) {
       container.innerHTML =
-        "<small>No supported accelerator detected (CPU only).</small>";
+        `<small>${t("No supported accelerator detected (CPU only).")}</small>`;
       return;
     }
     gpus.forEach((gpu) => {
@@ -2630,7 +2641,7 @@ async function loadGPUs() {
                 <div class="gpu-mem">${gpu.memory}</div>
                 <div class="gpu-status">
                     <div class="status-dot"></div>
-                    <span class="gpu-status-text">Idle</span>
+                    <span class="gpu-status-text">${t("Idle")}</span>
                 </div>
                 <input type="checkbox" name="gpu-select" value="${gpu.index}" checked id="gpu-${gpu.index}">
             `;
@@ -2653,7 +2664,7 @@ async function loadGPUs() {
     updateMultiGPUUI();
   } catch (err) {
     console.error("Failed to load GPUs:", err);
-    container.innerHTML = `<small style="color:red">Error: ${err.message}</small>`;
+    container.innerHTML = `<small style="color:red">${t("Error")}: ${err.message}</small>`;
   }
 }
 // Show the correct mode panel, hide the others.
@@ -2817,14 +2828,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const fsdpInfo = $("cfg-fsdp-strategy-info");
     if (!strategySelect || !fsdpInfo) return;
     const strategyMap = {
-      1: "<strong>FULL_SHARD</strong>: Shards optimizer states, gradients and parameters across all GPUs. Best for maximum VRAM savings.",
-      2: "<strong>SHARD_GRAD_OP</strong>: Shards optimizer states and gradients (equivalent to ZeRO-2). Faster than FULL_SHARD but uses more VRAM.",
-      3: "<strong>NO_SHARD</strong>: <strong>: Same as DDP</strong> Not recommended for real training",
-      4: "<strong>HYBRID_SHARD</strong>: Shards optimizer states, gradients and parameters within each node while each node has a full copy. Use for multi-node setups.",
-      5: "<strong>HYBRID_SHARD_ZERO2</strong>: Shards optimizer states and gradients within each node while each node has a full copy.",
+      1: "<strong>FULL_SHARD</strong>: 跨所有 GPU 分片优化器状态、梯度和参数。最适合最大化节省 VRAM。",
+      2: "<strong>SHARD_GRAD_OP</strong>: 分片优化器状态和梯度（等价于 ZeRO-2）。比 FULL_SHARD 更快，但会使用更多 VRAM。",
+      3: "<strong>NO_SHARD</strong>: 与 DDP 相同，不建议用于真实训练。",
+      4: "<strong>HYBRID_SHARD</strong>: 在每个节点内分片优化器状态、梯度和参数，同时每个节点保留完整副本。用于多节点场景。",
+      5: "<strong>HYBRID_SHARD_ZERO2</strong>: 在每个节点内分片优化器状态和梯度，同时每个节点保留完整副本。",
     };
     fsdpInfo.innerHTML =
-      strategyMap[strategySelect.value] || "Select a strategy to see details.";
+      strategyMap[strategySelect.value] || t("Select a strategy to see details.");
   };
   // Multi-GPU mode selector
   const modeSelect = $("cfg-multigpu-mode");
@@ -2896,7 +2907,7 @@ async function loadGenGPUs() {
     const gpus = await api("/api/system/gpus");
     container.innerHTML = "";
     if (gpus.length === 0) {
-      container.innerHTML = "<small>No supported accelerator detected.</small>";
+      container.innerHTML = `<small>${t("No supported accelerator detected.")}</small>`;
       return;
     }
     gpus.forEach((gpu, i) => {
@@ -2927,7 +2938,7 @@ async function loadGenGPUs() {
     updateGenGPULabel();
   } catch (err) {
     console.error("Failed to load gen GPUs:", err);
-    container.innerHTML = `<small style="color:red">Error: ${err.message}</small>`;
+    container.innerHTML = `<small style="color:red">${t("Error")}: ${err.message}</small>`;
   }
 }
 function getSelectedGenGPUs() {
@@ -2956,7 +2967,7 @@ function updateGenGPULabel() {
     'input[name="gen-gpu-select"]:checked',
   );
   if (selected.length > 1) {
-    label.textContent = "— Multi-GPU";
+    label.textContent = "— " + t("Multi-GPU");
     label.style.color = "var(--success)";
     if (optionsDiv) optionsDiv.style.display = "block";
   } else {
@@ -3135,7 +3146,7 @@ $("btn-gen-sample").addEventListener("click", async () => {
     return;
   }
   appendConsole(
-    `Starting generation...\n${loraPath ? `Using LoRA: ${loraPath} (x${payload.network_mul})` : "(Using base model)"}\nFlow Shift: ${payload.flow_shift}\n\n`,
+    `${t("Starting generation...")}\n${loraPath ? `${t("Using LoRA")}: ${loraPath} (x${payload.network_mul})` : t("(Using base model)")}\n${t("Flow Shift")}: ${payload.flow_shift}\n\n`,
   );
   showToast("Generation started");
 });
@@ -3171,7 +3182,7 @@ $("btn-stop").addEventListener("click", () => {
 });
 // Console clear
 $("btn-clear-console").addEventListener("click", () => {
-  consoleOutput.textContent = "Waiting for training to start...";
+  consoleOutput.textContent = t("Waiting for training to start...");
 });
 // Samples refresh
 $("btn-refresh-samples").addEventListener("click", loadSamples);
@@ -3269,7 +3280,7 @@ function renderProgressivePhases() {
   container.innerHTML = "";
 
   if (resList.length < 2) {
-    container.innerHTML = '<small>Enter at least 2 resolutions above to configure phases.</small>';
+    container.innerHTML = `<small>${t("Enter at least 2 resolutions above to configure phases.")}</small>`;
     updateProgressiveSum();
     return;
   }
@@ -3297,10 +3308,10 @@ function renderProgressivePhases() {
       ? existing[i].toFixed(2) : defaultFrac.toFixed(2);
 
     const hint = document.createElement("small");
-    hint.textContent = `${Math.round(parseFloat(input.value) * 100)}% of steps`;
+    hint.textContent = `${t("of steps")} ${Math.round(parseFloat(input.value) * 100)}%`;
 
     input.addEventListener("input", () => {
-      hint.textContent = `${Math.round(parseFloat(input.value) * 100)}% of steps`;
+      hint.textContent = `${t("of steps")} ${Math.round(parseFloat(input.value) * 100)}%`;
       updateProgressiveSum();
     });
 
@@ -3325,7 +3336,7 @@ function renderProgressivePhases() {
     window._pendingProgressiveSchedule = null;
   }
 
-  updateProgressiveSum();
+  hint.innerHTML = `${t("Each fraction is the portion of total steps for that resolution. Must sum to 1.0.")} &nbsp;<span style="font-weight:600;color:${ok ? "var(--success,#4caf50)" : "var(--error,#f44336)"}">${t("Sum")}: ${sum.toFixed(2)}</span>`;
 }
 
 function updateProgressiveSum() {

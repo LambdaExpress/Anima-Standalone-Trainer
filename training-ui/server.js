@@ -134,9 +134,93 @@ function getGlobalConfig() {
     };
 }
 
+const PLATFORM_PATH_PLACEHOLDERS = {
+    win32: {
+        image_dir: 'C:\\path\\to\\images',
+        lora: 'C:\\path\\to\\lora.safetensors',
+        resume: 'C:\\path\\to\\saved_state',
+        venv: 'C:\\Anima-Standalone-Trainer\\venv',
+        nvme: 'D:\\local_nvme',
+    },
+    darwin: {
+        image_dir: '/Users/you/datasets/images',
+        lora: '/Users/you/models/lora.safetensors',
+        resume: '/Users/you/outputs/saved_state',
+        venv: '/Users/you/Anima-Standalone-Trainer/venv',
+        nvme: '/Volumes/local_nvme',
+    },
+    linux: {
+        image_dir: '/home/you/datasets/images',
+        lora: '/home/you/models/lora.safetensors',
+        resume: '/home/you/outputs/saved_state',
+        venv: '/home/you/Anima-Standalone-Trainer/venv',
+        nvme: '/local_nvme',
+    },
+};
+
+const ARCH_PATH_PLACEHOLDERS = {
+    anima: {
+        dit_path: {
+            win32: 'C:\\Anima\\split_files\\diffusion_models\\anima-preview.safetensors',
+            darwin: '/Users/you/ComfyUI/models/diffusion_models/anima-preview.safetensors',
+            linux: '/home/you/ComfyUI/models/diffusion_models/anima-preview.safetensors',
+        },
+        qwen3_path: {
+            win32: 'C:\\Anima\\split_files\\text_encoders\\qwen_3_06b_base.safetensors',
+            darwin: '/Users/you/ComfyUI/models/text_encoders/qwen_3_06b_base.safetensors',
+            linux: '/home/you/ComfyUI/models/text_encoders/qwen_3_06b_base.safetensors',
+        },
+        vae_path: {
+            win32: 'C:\\Anima\\split_files\\vae\\qwen_image_vae.safetensors',
+            darwin: '/Users/you/ComfyUI/models/vae/qwen_image_vae.safetensors',
+            linux: '/home/you/ComfyUI/models/vae/qwen_image_vae.safetensors',
+        },
+    },
+    lumina: {
+        lumina_dit_path: {
+            win32: 'C:\\ComfyUI\\models\\checkpoints\\netayumeLumina.safetensors',
+            darwin: '/Users/you/ComfyUI/models/checkpoints/netayumeLumina.safetensors',
+            linux: '/home/you/ComfyUI/models/checkpoints/netayumeLumina.safetensors',
+        },
+        gemma2_path: {
+            win32: 'C:\\ComfyUI\\models\\text_encoders\\gemma-2b-it.safetensors',
+            darwin: '/Users/you/ComfyUI/models/text_encoders/gemma-2b-it.safetensors',
+            linux: '/home/you/ComfyUI/models/text_encoders/gemma-2b-it.safetensors',
+        },
+        lumina_vae_path: {
+            win32: 'C:\\ComfyUI\\models\\vae\\lumina_vae.safetensors',
+            darwin: '/Users/you/ComfyUI/models/vae/lumina_vae.safetensors',
+            linux: '/home/you/ComfyUI/models/vae/lumina_vae.safetensors',
+        },
+    },
+};
+
+function platformKey() {
+    if (isWindows) return 'win32';
+    if (isMacOS) return 'darwin';
+    return 'linux';
+}
+
+function getPlatformPathPlaceholders() {
+    return PLATFORM_PATH_PLACEHOLDERS[platformKey()] || PLATFORM_PATH_PLACEHOLDERS.linux;
+}
+
+function getLocalizedArchitectureRegistry() {
+    const registry = JSON.parse(JSON.stringify(ARCH_REGISTRY));
+    const platform = platformKey();
+    for (const [archId, arch] of Object.entries(registry.architectures || {})) {
+        const archPlaceholders = ARCH_PATH_PLACEHOLDERS[archId] || {};
+        for (const [configKey, pathDef] of Object.entries(arch.global_paths || {})) {
+            const placeholder = archPlaceholders[configKey]?.[platform];
+            if (placeholder) pathDef.placeholder = placeholder;
+        }
+    }
+    return registry;
+}
+
 // Serve architecture registry to frontend
 app.get('/api/architectures', (req, res) => {
-    res.json(ARCH_REGISTRY);
+    res.json(getLocalizedArchitectureRegistry());
 });
 
 app.get('/api/gpu/activity', (req, res) => {
@@ -673,6 +757,16 @@ app.delete('/api/global/background', (req, res) => {
 });
 
 // --- System API Routes ---
+
+app.get('/api/system/info', (req, res) => {
+    res.json({
+        platform: platformKey(),
+        isWindows,
+        isMacOS,
+        isWSL,
+        pathPlaceholders: getPlatformPathPlaceholders(),
+    });
+});
 
 app.get('/api/system/gpus', async (req, res) => {
     const gpus = await getDetectedGPUs();
