@@ -4856,6 +4856,18 @@ def resume_from_local_or_hf_if_specified(accelerator, args):
     accelerator.load_state(dirname)
 
 
+def _is_mps_available_for_training() -> bool:
+    try:
+        return torch.backends.mps.is_available()
+    except Exception:
+        return False
+
+
+def _is_bitsandbytes_optimizer_type(optimizer_type: str) -> bool:
+    normalized = optimizer_type.lower()
+    return "8bit" in normalized or normalized.startswith("paged") or normalized.startswith("bitsandbytes.")
+
+
 def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
     # "Optimizer to use: AdamW, AdamW8bit, Lion, SGDNesterov, SGDNesterov8bit, PagedAdamW, PagedAdamW8bit, PagedAdamW32bit, Lion8bit, PagedLion8bit, AdEMAMix8bit, PagedAdEMAMix8bit, DAdaptation(DAdaptAdamPreprint), DAdaptAdaGrad, DAdaptAdam, DAdaptAdan, DAdaptAdanIP, DAdaptLion, DAdaptSGD, Adafactor"
 
@@ -4878,6 +4890,12 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
     if optimizer_type is None or optimizer_type == "":
         optimizer_type = "AdamW"
     optimizer_type = optimizer_type.lower()
+    if _is_bitsandbytes_optimizer_type(optimizer_type) and _is_mps_available_for_training() and not torch.cuda.is_available():
+        logger.warning(
+            f"optimizer_type={args.optimizer_type!r} requires bitsandbytes/CUDA, which is not available on MPS. "
+            "Falling back to AdamW."
+        )
+        optimizer_type = "adamw"
 
     if args.fused_backward_pass:
         assert (

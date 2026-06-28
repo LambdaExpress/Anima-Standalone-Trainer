@@ -17,7 +17,7 @@ from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 from PIL.PngImagePlugin import PngInfo
 
-from library.device_utils import init_ipex, clean_memory_on_device
+from library.device_utils import init_ipex, clean_memory_on_device, synchronize_device
 
 init_ipex()
 
@@ -31,6 +31,47 @@ logger = logging.getLogger(__name__)
 from library import anima_models, anima_utils, save_utils, strategy_base, train_util
 
 from library.sd3_train_utils import FlowMatchEulerDiscreteScheduler, get_sigmas
+
+
+def is_mps_training_environment() -> bool:
+    """Return True when PyTorch should use Apple MPS instead of CUDA."""
+    try:
+        return torch.backends.mps.is_available() and not torch.cuda.is_available()
+    except Exception:
+        return False
+
+
+def sanitize_mps_training_args(args, log=logger):
+    """Disable CUDA-only options for single-device Apple MPS training."""
+    if not is_mps_training_environment():
+        return
+
+    if getattr(args, "unsloth_offload_checkpointing", False):
+        log.warning("unsloth_offload_checkpointing is CUDA-only. Disabling it for MPS training.")
+        args.unsloth_offload_checkpointing = False
+
+    if getattr(args, "cpu_offload_checkpointing", False):
+        log.warning("cpu_offload_checkpointing is not supported on the MPS path. Disabling it.")
+        args.cpu_offload_checkpointing = False
+
+    if getattr(args, "blocks_to_swap", None):
+        log.warning("blocks_to_swap is not supported on the MPS path. Setting it to 0.")
+        args.blocks_to_swap = 0
+
+    if getattr(args, "torch_compile", False):
+        log.warning("torch_compile is disabled for MPS training.")
+        args.torch_compile = False
+
+    if getattr(args, "use_cuda_direct", False):
+        args.use_cuda_direct = False
+
+    if getattr(args, "use_8bit_adam", False):
+        log.warning("use_8bit_adam requires bitsandbytes/CUDA. Falling back to optimizer_type=AdamW.")
+        args.use_8bit_adam = False
+        args.optimizer_type = "AdamW"
+
+    if getattr(args, "max_data_loader_n_workers", None) == 0 and getattr(args, "persistent_data_loader_workers", False):
+        args.persistent_data_loader_workers = False
 
 
 # Anima-specific training arguments
@@ -682,8 +723,8 @@ def _sample_image_inference(
 
     if seed is not None:
         torch.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)  # seed all CUDA devices for multi-GPU
-
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)  # seed all CUDA devices for multi-GPU
     height = max(64, height - height % 16)
     width = max(64, width - width % 16)
 
@@ -770,7 +811,7 @@ def _sample_image_inference(
                 sec_device = next(dit_secondary.parameters()).device
                 for block in dit_secondary.blocks:
                     weighs_to_device(block, sec_device)
-            torch.cuda.synchronize()
+            synchronize_device(accelerator.device)
             dit.blocks_to_swap = 0
             if dit_secondary is not None:
                 dit_secondary.blocks_to_swap = 0

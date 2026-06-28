@@ -27,6 +27,11 @@ const TEMPLATES_DIR = path.join(__dirname, 'templates');
 const GLOBAL_CONFIG_PATH = path.join(__dirname, 'global_config.toml');
 const UPLOAD_DIR = path.join(__dirname, 'public', 'uploads');
 const ARCHITECTURES_PATH = path.join(__dirname, 'architectures.json');
+const isWindows = process.platform === 'win32';
+const isMacOS = process.platform === 'darwin';
+// WSL2: platform is 'linux' but explorer.exe is available via Windows interop
+const isWSL = process.platform === 'linux' && !!process.env.WSL_DISTRO_NAME;
+
 
 // Load architecture registry
 const ARCH_REGISTRY = JSON.parse(fs.readFileSync(ARCHITECTURES_PATH, 'utf8'));
@@ -160,47 +165,60 @@ app.get('/api/gpu/activity', (req, res) => {
     res.json(activity);
 });
 
-// Get GPU Information using nvidia-smi with Python fallback
+// Get accelerator information using nvidia-smi with a PyTorch fallback.
 async function getDetectedGPUs() {
     return new Promise((resolve) => {
-        // 1. Try nvidia-smi
-        const smi = spawn('nvidia-smi', ['--query-gpu=index,name,memory.total', '--format=csv,noheader']);
-        let stdout = '';
-        let stderr = '';
+        let settled = false;
+        const resolveOnce = (devices) => {
+            if (settled) return;
+            settled = true;
+            resolve(devices);
+        };
 
-        smi.stdout.on('data', (data) => stdout += data);
-        smi.stderr.on('data', (data) => stderr += data);
-
-        smi.on('close', (code) => {
-            if (code === 0 && stdout) {
-                const gpus = stdout.trim().split('\n').map(line => {
-                    const parts = line.split(',').map(s => s.trim());
-                    if (parts.length < 3) return null;
-                    return {
-                        index: parseInt(parts[0]),
-                        name: parts[1],
-                        memory: parts[2]
-                    };
-                }).filter(g => g !== null);
-                return resolve(gpus);
-            }
-
-            // 2. Fallback to Python (torch)
+        const pythonFallback = () => {
             console.warn("nvidia-smi failed, trying python fallback...");
             const globalConfig = getGlobalConfig();
             const venvPath = toNativePath(globalConfig.venv_path || path.join(ROOT_DIR, 'venv'));
-            let pythonPath = 'python'; // Default
-            if (process.platform === 'win32') {
+            let pythonPath;
+            if (isWindows) {
                 pythonPath = path.join(venvPath, 'Scripts', 'python.exe');
             } else {
                 pythonPath = path.join(venvPath, 'bin', 'python');
             }
 
             if (!fs.existsSync(pythonPath)) {
-                pythonPath = 'python';
+                pythonPath = isWindows ? 'python' : 'python3';
             }
 
-            const pyScript = "import torch; import json; print(json.dumps([{'index': i, 'name': torch.cuda.get_device_name(i), 'memory': f'{torch.cuda.get_device_properties(i).total_memory // 1024**2} MiB'} for i in range(torch.cuda.device_count())]))";
+            const pyScript = `
+import json
+devices = []
+try:
+    import torch
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
+            devices.append({
+                "index": i,
+                "name": torch.cuda.get_device_name(i),
+                "memory": f"{props.total_memory // 1024**2} MiB",
+                "backend": "cuda",
+            })
+    try:
+        mps_backend = getattr(torch.backends, "mps", None)
+        if mps_backend is not None and mps_backend.is_built() and mps_backend.is_available():
+            devices.append({
+                "index": 0,
+                "name": "Apple Metal Performance Shaders",
+                "memory": "Unified memory",
+                "backend": "mps",
+            })
+    except Exception:
+        pass
+except Exception as exc:
+    raise SystemExit(str(exc))
+print(json.dumps(devices))
+`;
 
             const pyProc = spawn(pythonPath, ['-c', pyScript]);
             let pyOut = '';
@@ -211,48 +229,135 @@ async function getDetectedGPUs() {
 
             pyProc.on('close', (pyCode) => {
                 if (pyCode !== 0) {
-                    console.error("Python GPU detection failed:", pyErr);
-                    return resolve([]);
+                    console.error("Python accelerator detection failed:", pyErr || pyOut);
+                    return resolveOnce([]);
                 }
                 try {
-                    const gpus = JSON.parse(pyOut.trim());
-                    resolve(gpus);
+                    const devices = JSON.parse(pyOut.trim() || '[]');
+                    resolveOnce(devices);
                 } catch (e) {
-                    console.error("Failed to parse Python GPU output:", e);
-                    resolve([]);
+                    console.error("Failed to parse Python accelerator output:", e);
+                    resolveOnce([]);
                 }
             });
+            pyProc.on('error', (err) => {
+                console.error("Python accelerator detection failed:", err.message);
+                resolveOnce([]);
+            });
+        };
+
+        const smi = spawn('nvidia-smi', ['--query-gpu=index,name,memory.total', '--format=csv,noheader']);
+        let stdout = '';
+
+        smi.stdout.on('data', (data) => stdout += data);
+
+        smi.on('close', (code) => {
+            if (code === 0 && stdout) {
+                const gpus = stdout.trim().split('\n').map(line => {
+                    const parts = line.split(',').map(s => s.trim());
+                    if (parts.length < 3) return null;
+                    return {
+                        index: parseInt(parts[0]),
+                        name: parts[1],
+                        memory: parts[2],
+                        backend: 'cuda',
+                    };
+                }).filter(g => g !== null);
+                return resolveOnce(gpus);
+            }
+
+            pythonFallback();
         });
 
-        smi.on('error', (err) => {
-            // Silently fail to fallback
-        });
+        smi.on('error', () => pythonFallback());
     });
+}
+
+function isBitsAndBytesOptimizer(optimizerType) {
+    if (!optimizerType) return false;
+    const normalized = optimizerType.toString().toLowerCase();
+    return normalized.includes('8bit')
+        || normalized.startsWith('paged')
+        || normalized.startsWith('bitsandbytes.');
+}
+
+function applyPlatformDefaults(config) {
+    if (!isMacOS) return config;
+
+    const ta = config.training_arguments || {};
+    if (!ta.optimizer_type || isBitsAndBytesOptimizer(ta.optimizer_type)) {
+        ta.optimizer_type = 'AdamW';
+    }
+    if (!ta.mixed_precision || ta.mixed_precision === 'bf16') {
+        ta.mixed_precision = 'no';
+    }
+    ta.max_data_loader_n_workers = 0;
+    ta.persistent_data_loader_workers = false;
+    config.training_arguments = ta;
+    return config;
+}
+
+function normalizeMacTrainingConfig(config) {
+    if (!isMacOS) return config;
+
+    const ta = config.training_arguments || {};
+    if (isBitsAndBytesOptimizer(ta.optimizer_type)) {
+        console.warn(`[macOS] Optimizer ${ta.optimizer_type} requires bitsandbytes/CUDA. Falling back to AdamW.`);
+        ta.optimizer_type = 'AdamW';
+    }
+    if (ta.use_8bit_adam) {
+        console.warn('[macOS] use_8bit_adam requires bitsandbytes/CUDA. Falling back to AdamW.');
+        delete ta.use_8bit_adam;
+        ta.optimizer_type = 'AdamW';
+    }
+    if (ta.torch_compile) {
+        console.warn('[macOS] torch_compile is disabled for MPS training.');
+        ta.torch_compile = false;
+    }
+    if (ta.use_cuda_direct) {
+        delete ta.use_cuda_direct;
+    }
+    if (ta.multigpu_mode && ta.multigpu_mode !== 'ddp') {
+        console.warn(`[macOS] ${ta.multigpu_mode} is CUDA multi-GPU only. Using single-process MPS training.`);
+        ta.multigpu_mode = 'ddp';
+    }
+    if (ta.deepspeed || ta.use_fsdp) {
+        console.warn('[macOS] DeepSpeed/FSDP are disabled for MPS training.');
+        delete ta.deepspeed;
+        delete ta.use_fsdp;
+    }
+    if (Number(ta.max_data_loader_n_workers || 0) === 0) {
+        ta.max_data_loader_n_workers = 0;
+        ta.persistent_data_loader_workers = false;
+    }
+    config.training_arguments = ta;
+    return config;
 }
 
 function getDefaultConfig() {
     const templatePath = path.join(TEMPLATES_DIR, 'config_template.toml');
     if (fs.existsSync(templatePath)) {
         try {
-            return { config: TOML.parse(fs.readFileSync(templatePath, 'utf8')), useFallback: false };
+            return { config: applyPlatformDefaults(TOML.parse(fs.readFileSync(templatePath, 'utf8'))), useFallback: false };
         } catch (err) {
             console.error('Config template parse error:', err.message);
         }
     }
     return {
-        config: {
+        config: applyPlatformDefaults({
             training_arguments: {
                 output_name: 'my_anima_lora',
                 learning_rate: 5e-5,
                 max_train_epochs: 20,
-                mixed_precision: 'bf16'
+                mixed_precision: isMacOS ? 'no' : 'bf16',
+                optimizer_type: 'AdamW'
             },
             network_arguments: {
                 network_module: 'networks.lora_anima',
                 network_dim: 16,
                 network_alpha: 16
             }
-        },
+        }),
         useFallback: true
     };
 }
@@ -882,10 +987,6 @@ function killProcess(pid, gracefulMs = 8000) {
 
 // --- Cross-platform venv/spawn helpers ---
 
-const isWindows = process.platform === 'win32';
-// WSL2: platform is 'linux' but explorer.exe is available via Windows interop
-const isWSL = process.platform === 'linux' && !!process.env.WSL_DISTRO_NAME;
-
 // Open a file path or URL in the system file manager / browser
 function openNative(target, isUrl = false) {
     if (isWindows) {
@@ -951,7 +1052,7 @@ function buildEnvVar(name, value) {
 // Returns { gpuEnv, accelerateFlags, tpTrainCmd } or { error }
 function buildLaunchConfig(gpuIds, mergedConfig, mergedConfigPath, jobArch) {
     const ta = mergedConfig.training_arguments || {};
-    const mixedPrec = ta.mixed_precision || 'bf16';
+    const mixedPrec = ta.mixed_precision || (isMacOS ? 'no' : 'bf16');
     const mode = ta.multigpu_mode || (ta.deepspeed ? 'deepspeed' : (ta.use_fsdp ? 'fsdp' : 'ddp'));
 
     let gpuEnv = '';
@@ -966,6 +1067,17 @@ function buildLaunchConfig(gpuIds, mergedConfig, mergedConfigPath, jobArch) {
         if (validIds.some(id => isNaN(parseInt(id))))
             return { error: 'GPU IDs must be valid numbers.' };
 
+
+        if (isMacOS) {
+            if (validIds.length > 1) {
+                return { error: 'macOS MPS supports single-device training only. Select one accelerator or leave GPU selection empty.' };
+            }
+            if (mode !== 'ddp') {
+                return { error: `${mode} is CUDA multi-GPU only and is not supported on macOS MPS.` };
+            }
+            accelerateFlags = `--mixed_precision ${mixedPrec}`;
+            return { gpuEnv, accelerateFlags, tpTrainCmd };
+        }
         gpuEnv = buildEnvVar('CUDA_VISIBLE_DEVICES', validIds.join(','));
 
         if (validIds.length > 1) {
@@ -1227,7 +1339,16 @@ app.post('/api/jobs/:name/generate', async (req, res) => {
         const genGpuIdsNormalized = currentGpuIdsRaw.split(',').map(s => s.trim()).filter(s => s.length > 0).sort().join(',');
 
         if (genGpuIdsNormalized) {
-            if (/^[\d\s,]+$/.test(genGpuIdsNormalized)) {
+            if (!/^[\d\s,]+$/.test(genGpuIdsNormalized)) {
+                return res.status(400).json({ error: `Invalid GPU IDs format: "${genGpuIdsNormalized}". Use numbers separated by commas.` });
+            }
+            if (isMacOS) {
+                const count = genGpuIdsNormalized.split(',').filter(Boolean).length;
+                if (count > 1) {
+                    return res.status(400).json({ error: 'macOS MPS supports single-device generation only.' });
+                }
+                console.log('[Gen] Using Apple MPS accelerator.');
+            } else {
                 gpuEnv = buildEnvVar('CUDA_VISIBLE_DEVICES', genGpuIdsNormalized);
                 console.log(`[Gen] Using GPU isolation: ${gpuEnv}`);
             }
@@ -1270,6 +1391,9 @@ app.post('/api/jobs/:name/generate', async (req, res) => {
         const genGpuCount = genGpuIdsNormalized ? genGpuIdsNormalized.split(',').length : 0;
         let genAccelerateFlags = '';
         if (genGpuCount > 1) {
+            if (isMacOS) {
+                return res.status(400).json({ error: 'macOS MPS does not support multi-GPU generation modes.' });
+            }
             const multiGpuMode = req.body.gen_multi_gpu_mode || 'parallel_cfg';
             args.push(`--device_map=${multiGpuMode}`);
             // Force single process -> both modes run one process across all GPUs
@@ -1466,6 +1590,7 @@ app.post('/api/jobs/:name/train/start', async (req, res) => {
 
         // Build merged config and write to temp file
         const mergedConfig = buildTrainingConfig(jobName, jobPath);
+        normalizeMacTrainingConfig(mergedConfig);
 
         // TP/SP: strip options that are incompatible with the TP training script.
         const launchMode = mergedConfig.training_arguments?.multigpu_mode

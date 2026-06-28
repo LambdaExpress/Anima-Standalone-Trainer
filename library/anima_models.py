@@ -314,9 +314,10 @@ class RMSNorm(torch.nn.Module):
     def _norm(self, x: torch.Tensor) -> torch.Tensor:
         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
 
-    @torch.amp.autocast(device_type='cuda', dtype=torch.float32)
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        output = self._norm(x.float()).type_as(x)
+        device_type = x.device.type if x.device.type != "mps" else "cpu"
+        with torch.amp.autocast(device_type=device_type, enabled=False):
+            output = self._norm(x.float()).type_as(x)
         return output * self.weight
 
 
@@ -1133,7 +1134,7 @@ class Block(nn.Module):
                     def custom_forward(*inputs):
                         device = next(
                             (t.device for t in inputs if isinstance(t, torch.Tensor) and t.device.type != 'cpu'),
-                            torch.device('cuda'),
+                            next(self.parameters()).device,
                         )
                         device_inputs = to_device(inputs, device)
                         outputs = func(*device_inputs)

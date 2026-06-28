@@ -177,6 +177,7 @@ class AnimaTrainer:
         train_util.prepare_dataset_args(args, True)
         deepspeed_utils.prepare_deepspeed_args(args)
         setup_logging(args, reset=True)
+        anima_train_utils.sanitize_mps_training_args(args, logger)
 
         # backward compatibility
         if not args.skip_cache_check:

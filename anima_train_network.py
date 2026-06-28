@@ -60,6 +60,7 @@ class AnimaNetworkTrainer(train_network.NetworkTrainer):
         elif global_dropout_rate > 0:
             logger.info(f"Using global embedding-level caption dropout rate: {global_dropout_rate}")
 
+        anima_train_utils.sanitize_mps_training_args(args, logger)
         if args.cache_text_encoder_outputs:
             assert (
                 train_dataset_group.is_text_encoder_output_cacheable()

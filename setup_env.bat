@@ -1,4 +1,5 @@
 @echo off
+setlocal EnableDelayedExpansion
 cd /d %~dp0
 
 node -v >nul 2>&1
@@ -65,90 +66,136 @@ if %errorlevel% neq 0 (
 echo Node.js detected.
 echo.
 
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo.
-    echo [ERROR] Python is not installed or not on PATH!
-    echo Please install Python 3.10 - 3.13 from: https://www.python.org/downloads/
-    echo Make sure to check "Add Python to PATH" during installation.
-    echo.
-    pause
-    exit /b 1
-)
+where uv >nul 2>&1
+if not errorlevel 1 (
+    echo uv detected. Using uv for Python environment management.
+    set "UV_CACHE_DIR=%CD%\.uv-cache"
+    set "UV_PYTHON_INSTALL_DIR=%CD%\.uv-python"
 
-for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do set PYVER=%%v
-for /f "tokens=1,2 delims=." %%a in ("%PYVER%") do (
-    set PY_MAJOR=%%a
-    set PY_MINOR=%%b
-)
-if %PY_MAJOR% neq 3 (
-    echo.
-    echo [ERROR] Python 3.10 - 3.13 is required. Found Python %PYVER%.
-    echo Please install a supported version from: https://www.python.org/downloads/
-    echo.
-    pause
-    exit /b 1
-)
-if %PY_MINOR% LSS 10 (
-    echo.
-    echo [ERROR] Python %PYVER% is too old. Minimum required: Python 3.10.
-    echo Please install Python 3.10 - 3.13 from: https://www.python.org/downloads/
-    echo.
-    pause
-    exit /b 1
-)
-if %PY_MINOR% GEQ 14 (
-    echo.
-    echo [ERROR] Python %PYVER% is not yet supported. Maximum supported: Python 3.13.
-    echo Please install Python 3.10 - 3.13 from: https://www.python.org/downloads/
-    echo.
-    pause
-    exit /b 1
-)
-echo Python %PYVER% detected.
-echo.
+    if not exist venv (
+        echo Creating venv with uv...
+        uv venv --python 3.12 venv
+        if errorlevel 1 (
+            echo.
+            echo [ERROR] Failed to create virtual environment with uv.
+            echo.
+            pause
+            exit /b 1
+        )
+    ) else (
+        echo Venv already exists.
+    )
 
-if not exist venv (
-    echo Creating venv...
-    python -m venv venv
-    if %errorlevel% neq 0 (
+    set "VENV_PYTHON=venv\Scripts\python.exe"
+    if not exist "!VENV_PYTHON!" (
         echo.
-        echo [ERROR] Failed to create virtual environment.
-        echo Make sure Python 3.10+ is installed correctly.
+        echo [ERROR] Virtual environment Python not found at !VENV_PYTHON!
+        echo Try deleting the venv folder and running this script again.
+        echo.
+        pause
+        exit /b 1
+    )
+
+    echo ----------------------------------------------------------------------
+    echo Installing requirements with uv...
+    echo ----------------------------------------------------------------------
+    uv pip install --python "!VENV_PYTHON!" -r requirements.txt
+    if errorlevel 1 (
+        echo.
+        echo [ERROR] uv pip install failed.
+        echo Check the output above for details.
         echo.
         pause
         exit /b 1
     )
 ) else (
-    echo Venv already exists.
-)
+    echo [WARN] uv not found. Falling back to python -m venv and pip.
 
-set "VENV_PYTHON=venv\Scripts\python.exe"
-if not exist "%VENV_PYTHON%" (
-    echo.
-    echo [ERROR] Virtual environment Python not found at %VENV_PYTHON%
-    echo Try deleting the venv folder and running this script again.
-    echo.
-    pause
-    exit /b 1
-)
+    python --version >nul 2>&1
+    if errorlevel 1 (
+        echo.
+        echo [ERROR] Python is not installed or not on PATH!
+        echo Please install Python 3.10 - 3.13 from: https://www.python.org/downloads/
+        echo Make sure to check "Add Python to PATH" during installation.
+        echo.
+        pause
+        exit /b 1
+    )
 
-echo ----------------------------------------------------------------------
-echo Upgrading pip and installing requirements...
-echo ----------------------------------------------------------------------
-"%VENV_PYTHON%" -m pip install --upgrade pip
-if %errorlevel% neq 0 (
-    echo [WARNING] Failed to upgrade pip. Continuing with requirements...
-)
+    for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do set PYVER=%%v
+    for /f "tokens=1,2 delims=." %%a in ("!PYVER!") do (
+        set PY_MAJOR=%%a
+        set PY_MINOR=%%b
+    )
+    if !PY_MAJOR! neq 3 (
+        echo.
+        echo [ERROR] Python 3.10 - 3.13 is required. Found Python !PYVER!.
+        echo Please install a supported version from: https://www.python.org/downloads/
+        echo.
+        pause
+        exit /b 1
+    )
+    if !PY_MINOR! LSS 10 (
+        echo.
+        echo [ERROR] Python !PYVER! is too old. Minimum required: Python 3.10.
+        echo Please install Python 3.10 - 3.13 from: https://www.python.org/downloads/
+        echo.
+        pause
+        exit /b 1
+    )
+    if !PY_MINOR! GEQ 14 (
+        echo.
+        echo [ERROR] Python !PYVER! is not yet supported. Maximum supported: Python 3.13.
+        echo Please install Python 3.10 - 3.13 from: https://www.python.org/downloads/
+        echo.
+        pause
+        exit /b 1
+    )
+    echo Python !PYVER! detected.
+    echo.
 
-"%VENV_PYTHON%" -m pip install -r requirements.txt
-if %errorlevel% neq 0 (
-    echo.
-    echo [ERROR] pip install failed.
-    echo Check the output above for details.
-    echo.
-    pause
-    exit /b 1
+    if not exist venv (
+        echo Creating venv...
+        python -m venv venv
+        if errorlevel 1 (
+            echo.
+            echo [ERROR] Failed to create virtual environment.
+            echo Make sure Python 3.10+ is installed correctly.
+            echo.
+            pause
+            exit /b 1
+        )
+    ) else (
+        echo Venv already exists.
+    )
+
+    set "VENV_PYTHON=venv\Scripts\python.exe"
+    if not exist "!VENV_PYTHON!" (
+        echo.
+        echo [ERROR] Virtual environment Python not found at !VENV_PYTHON!
+        echo Try deleting the venv folder and running this script again.
+        echo.
+        pause
+        exit /b 1
+    )
+
+    echo ----------------------------------------------------------------------
+    echo Upgrading pip and installing requirements...
+    echo ----------------------------------------------------------------------
+    "!VENV_PYTHON!" -m pip install --upgrade pip
+    if errorlevel 1 (
+        echo [WARNING] Failed to upgrade pip. Continuing with requirements...
+    )
+
+    "!VENV_PYTHON!" -m pip install -r requirements.txt
+    if errorlevel 1 (
+        echo.
+        echo [ERROR] pip install failed.
+        echo Check the output above for details.
+        echo.
+        pause
+        exit /b 1
+    )
 )
 
 echo.

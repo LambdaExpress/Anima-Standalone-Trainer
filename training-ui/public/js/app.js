@@ -2615,7 +2615,7 @@ async function loadGPUs() {
     container.innerHTML = "";
     if (gpus.length === 0) {
       container.innerHTML =
-        "<small>No NVIDIA GPUs detected (CPU only).</small>";
+        "<small>No supported accelerator detected (CPU only).</small>";
       return;
     }
     gpus.forEach((gpu) => {
@@ -2623,8 +2623,9 @@ async function loadGPUs() {
       card.className = "gpu-card selected"; // Default to all selected
       card.dataset.index = gpu.index;
       card.id = `gpu-card-${gpu.index}`;
+      const deviceLabel = gpu.backend === "mps" ? "MPS" : "GPU";
       card.innerHTML = `
-                <div class="gpu-index">GPU ${gpu.index}</div>
+                <div class="gpu-index">${deviceLabel} ${gpu.index}</div>
                 <div class="gpu-name" title="${gpu.name}">${gpu.name}</div>
                 <div class="gpu-mem">${gpu.memory}</div>
                 <div class="gpu-status">
@@ -2895,7 +2896,7 @@ async function loadGenGPUs() {
     const gpus = await api("/api/system/gpus");
     container.innerHTML = "";
     if (gpus.length === 0) {
-      container.innerHTML = "<small>No NVIDIA GPUs detected.</small>";
+      container.innerHTML = "<small>No supported accelerator detected.</small>";
       return;
     }
     gpus.forEach((gpu, i) => {
@@ -2903,8 +2904,9 @@ async function loadGenGPUs() {
       card.className = "gpu-card" + (i === 0 ? " selected" : "");
       card.dataset.index = gpu.index;
       card.id = `gen-gpu-card-${gpu.index}`;
+      const deviceLabel = gpu.backend === "mps" ? "MPS" : "GPU";
       card.innerHTML = `
-                <div class="gpu-index">GPU ${gpu.index}</div>
+                <div class="gpu-index">${deviceLabel} ${gpu.index}</div>
                 <div class="gpu-name" title="${gpu.name}">${gpu.name}</div>
                 <div class="gpu-mem">${gpu.memory}</div>
                 <input type="checkbox" name="gen-gpu-select" value="${gpu.index}" ${i === 0 ? "checked" : ""} id="gen-gpu-${gpu.index}">
