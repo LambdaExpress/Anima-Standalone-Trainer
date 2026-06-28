@@ -65,6 +65,10 @@ def sanitize_mps_training_args(args, log=logger):
     if getattr(args, "use_cuda_direct", False):
         args.use_cuda_direct = False
 
+    if getattr(args, "mixed_precision", "no") != "no":
+        log.warning("Accelerate mixed precision is not supported on the MPS path. Setting mixed_precision=no.")
+        args.mixed_precision = "no"
+
     if getattr(args, "use_8bit_adam", False):
         log.warning("use_8bit_adam requires bitsandbytes/CUDA. Falling back to optimizer_type=AdamW.")
         args.use_8bit_adam = False

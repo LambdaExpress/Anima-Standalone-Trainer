@@ -310,6 +310,10 @@ function normalizeMacTrainingConfig(config) {
         delete ta.use_8bit_adam;
         ta.optimizer_type = 'AdamW';
     }
+    if (ta.mixed_precision && ta.mixed_precision !== 'no') {
+        console.warn(`[macOS] mixed_precision=${ta.mixed_precision} is not supported by Accelerate on MPS. Using no mixed precision.`);
+        ta.mixed_precision = 'no';
+    }
     if (ta.torch_compile) {
         console.warn('[macOS] torch_compile is disabled for MPS training.');
         ta.torch_compile = false;
