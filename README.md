@@ -3,16 +3,17 @@
 
 # Anima Standalone Trainer
 
-A lightweight, decoupled training environment for circlestone-labs' Anima model, currently support Lora training only. Windows and Linux support. Built upon [sd-scripts](https://github.com/kohya-ss/sd-scripts) implementation.
+A lightweight, decoupled training environment for circlestone-labs' Anima model, currently support Lora training only. Windows and Linux CUDA training are supported; macOS supports single-device Apple Silicon MPS training. Built upon [sd-scripts](https://github.com/kohya-ss/sd-scripts) implementation.
 
 <img width="2554" height="1234" alt="image" src="https://github.com/user-attachments/assets/cb5ff930-ce8c-49d6-a77a-3da393fe719d" />
 
 
 ## Prerequisites
 
-- **Python 3.10+** (Python 3.12 recommended)
+- **Python 3.10+** (Python 3.12 recommended; `uv` is recommended for environment management)
 - **Node.js** (Required for the Web UI)
-- **CUDA fitting your system** (CUDA 12.7+ recommended)
+- **CUDA fitting your system** for Windows/Linux NVIDIA training (CUDA 12.7+ recommended)
+- **Apple Silicon with PyTorch MPS** for macOS training
 
 ## Installation
 
@@ -36,14 +37,22 @@ Run the provided setup script for your operating system:
 ./setup_env.sh
 ```
 
-*This will create a virtual environment (`venv`), install all Python dependencies (assuming you have met the prereqisites), and set up the Web UI.*
+**macOS:**
+```bash
+./setup_env.sh
+```
 
-This script will probably install Torch and Torchvision version below.
-Depends on your system, you may want to install another version of Pytorch with CUDA.
+On macOS, the setup script uses `uv`, installs Python packages from `requirements-macos.txt`, skips CUDA-only packages such as `bitsandbytes` and `cuda_direct_backend`, and installs Node.js inside the project `.tools` directory when Node.js is not already on `PATH`.
+
+*This will create a virtual environment (`venv`), install all Python dependencies (assuming you have met the prerequisites), and set up the Web UI.*
+
+The default CUDA requirements install Torch and Torchvision similar to:
 
 ```cmd
 pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
 ```
+
+macOS uses the standard PyPI macOS PyTorch wheels instead of the CUDA wheel index.
 
 ## Launching the UI
 
@@ -57,6 +66,11 @@ To start the training server and open the web interface:
 **Linux:**
 ```bash
 ./training-ui/start_linux.sh
+```
+
+**macOS:**
+```bash
+./training-ui/start_macos.sh
 ```
 Once launched, open your browser to: `http://localhost:3000`
 
@@ -79,6 +93,19 @@ These paths are saved globally and shared across all training jobs.
 **v2.0.0. Linux support, Multi-GPU inference**
 
 **v1.1.0. Improving caching and others I/O performance.**
+
+## macOS MPS Support
+
+macOS support is intentionally limited to single-device Apple Silicon MPS training.
+
+- Supported: Anima LoRA training on one MPS device.
+- Default macOS optimizer: `AdamW` instead of `AdamW8bit`, because `bitsandbytes` is CUDA-oriented.
+- Default macOS mixed precision: `no`. `accelerate==1.6.0` does not accept `bf16` mixed precision on MPS even when PyTorch can run individual bf16 MPS operations.
+- The UI exposes the Apple MPS device in GPU selection and does not set `CUDA_VISIBLE_DEVICES` on macOS.
+- The UI sets `PYTORCH_ENABLE_MPS_FALLBACK=1` for macOS launches so unsupported MPS ops can fall back to CPU.
+- Not supported on macOS: CUDA Direct, Tensor Parallel / Sequence Parallel, NCCL, DeepSpeed, FSDP, CUDA multi-GPU modes, and CUDA-only block/offload fast paths.
+
+Validated on macOS 26.5.1 arm64 with PyTorch 2.7.0 by running a one-step Anima LoRA training smoke test on `mps:0`.
 
 ## Multi-GPU
 
